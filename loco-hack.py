@@ -1,122 +1,102 @@
-from base64 import b64encode
-from os import makedirs
-from os.path import join, basename
-from sys import argv
-import json
-import requests
+import gtk.gdk
+from googlesearch.googlesearch import GoogleSearch
 import os
-from PIL import Image
+import webbrowser
+import urllib
+from bs4 import BeautifulSoup
+import urllib2
 import re
-import pyautogui
 
-CLOUD_VISION_ENDPOINT_URL = 'https://vision.googleapis.com/v1/images:annotate'
+w = gtk.gdk.get_default_root_window()
+sz = w.get_size()
+#print "The size of the window is %d x %d" % sz
+pb = gtk.gdk.Pixbuf(gtk.gdk.COLORSPACE_RGB,False,8,sz[0],sz[1])
+pb = pb.get_from_drawable(w,w.get_colormap(),1015,290,0,0,300,300)
+if (pb != None):
+    pb.save("screenshot.png","png")
+    print "Screenshot saved to screenshot.png."
+else:
+    print "Unable to get the screenshot." 
 
-from googleapiclient.discovery import build
-import pprint
+os.system("convert -trim screenshot.png screenshot.png")
+os.system("convert -resize 300% screenshot.png screenshot.png")
+os.system("tesseract /home/elcot/screenshot.png loco001")
+fi=open("loco001.txt","r")
+m=fi.read()
 
-api_key = "Your API KEY"
-cse_id = "Your CSE-ID"
+m=''.join([i if ord(i) < 128 else ' ' for i in m])
+m=re.sub(' +',' ',m)
 
-def google_search(search_term, api_key, cse_id, **kwargs):
-    service = build("customsearch", "v1", developerKey=api_key)
-    res = service.cse().list(q=search_term, cx=cse_id, **kwargs).execute()
-    return res['items']
+if(m.find("?")!=-1):
+  m=list(m.split("?"))
+else:
+  m=list(m.split("."))
 
-def scores_with_options(question,options,**kwargs):
-    service = build("customsearch", "v1", developerKey=api_key)
-    scores = [0,0,0]
-    for idx, option in enumerate(options):
-        res = service.cse().list(q=question+' '+option, cx=cse_id, **kwargs).execute()
-        scores[idx] = int(res['searchInformation']['totalResults'])
-    return scores
+url =str("+".join((m[0].lstrip()).split()))+"?"
 
-def normal_scores(question,options):
-    results = google_search(question, api_key, cse_id, num=10)
-    scores = [0,0,0]
-    for idx, result in enumerate(results):
-        snippet = result['snippet']
-        for n, option in enumerate(options):
-            occurences = snippet.lower().count(option)
-            scores[n] = occurences+scores[n]
-    return scores
+n=m[1]
+n=list((n.lstrip()).split("\n"))
 
-def make_image_data_list(image_filenames):
-    """
-    image_filenames is a list of filename strings
-    Returns a list of dicts formatted as the Vision API
-        needs them to be
-    """
-    img_requests = []
-    for imgname in image_filenames:
-        with open(imgname, 'rb') as f:
-            ctxt = b64encode(f.read()).decode()
-            img_requests.append({
-                    'image': {'content': ctxt},
-                    'features': [{
-                        'type': 'TEXT_DETECTION',
-                        'maxResults': 1
-                    }]
-            })
-    return img_requests
+url="http://www.google.com.tr/search?q={}".format(url)
+chro= '/usr/bin/chromium %s'
 
-def make_image_data(image_filenames):
-    """Returns the image data lists as bytes"""
-    imgdict = make_image_data_list(image_filenames)
-    return json.dumps({"requests": imgdict }).encode()
+headers={}
+headers["User-Agent"]='Mozilla/5.0'
+urls=urllib2.Request(url,headers=headers)
+html = urllib2.urlopen(urls).read()
+soup = BeautifulSoup(html)
 
-def request_ocr(api_key, image_filenames):
-    response = requests.post(CLOUD_VISION_ENDPOINT_URL,
-                             data=make_image_data(image_filenames),
-                             params={'key': api_key},
-                             headers={'Content-Type': 'application/json'})
-    return response
+# kill all script and style elements
+for script in soup(["script", "style"]):
+    script.extract()    # rip it out
 
-def get_text_from_response(response):
-    t = response['textAnnotations'][0]
-    return (t['description'])
+# get text
+text = soup.get_text()
 
-def take_screenshot():
-    pyautogui.screenshot("screen.png")
+# break into lines and remove leading and trailing space on each
+lines = (line.strip() for line in text.splitlines())
+# break multi-headlines into a line each
+chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+# drop blank lines
+text = '\n'.join(chunk for chunk in chunks if chunk)
+l=[]
+for i in range(len(text)):
+    if(text[i].isalpha() or text[i].isdigit() or text[i]==" "):
+      l.append(text[i])
+     
+strr="".join(l)
+strr=strr.lower()
+fun=1
 
-def split_screen_to_question_and_options():
-    i = Image.open('screen.png')
-    width, height = i.size
-    frame = i.crop(((1020,300,width,390)))
-    frame.save('question.png')
-    frame = i.crop(((1020,390,width,445)))
-    frame.save('1.png')
-    frame = i.crop(((1020,445,width,500)))
-    frame.save('2.png')
-    frame = i.crop(((1020,500,width,600)))
-    frame.save('3.png')
+l=list(map(str,strr.split()))
+#print(strr)
+#print(url)
+for i in n:
+   if(i!="" and i!=" "):
+     k=0; sco=[]
+     for j in list(i.split()):
+       kco=strr.count(j.lower())
+       k+=kco
+       sco.append(kco)
+     if(k!=0):
+         fun=0
+     print sco,"\t",(i,k)
 
 
-option_names = ['A','B','C']
+def simil(x,f):
+  p=0
+  for i in f:
+    z=len(set(x) & set(i))
+    if((z==len(x)-1 or z==len(i)-1) and abs(len(x)-len(i))<=2):
+      p+=1
+  return p
 
-def print_scores(scores,method):
-    print (method+'\n-----------------------------')
-    print ("Most relevant : "+ str(option_names[scores.index(max(scores))]))
-    print ("Least relevant : "+ str(option_names[scores.index(min(scores))]))
-    print scores
 
+if(fun==1):
+  for i in n:
+    if(i!="" and i[0]!=" "):
+       for j in list(i.split()):
+         k=0
+         k+=simil(j.lower(),l)
+    print(i,k)
 
-if __name__ == '__main__':
-    while True:
-        a = raw_input("Press Enter When You See Question\n")
-        take_screenshot()
-        split_screen_to_question_and_options()
-        image_filenames = ['question.png','1.png','2.png','3.png']
-        response = request_ocr(api_key, image_filenames)
-        if response.status_code != 200 or response.json().get('error'):
-            print(response.text)
-        else:
-            responses = (response.json()['responses'])
-            question = get_text_from_response(responses[0])
-            question = re.sub('[^A-Za-z0-9\s]+', '', question)
-            options = [get_text_from_response(responses[1]),get_text_from_response(responses[2]),get_text_from_response(responses[3])]
-            for idx,option in enumerate(options):
-                options[idx] = option.strip(' \t\n\r').lower()
-            normal = normal_scores(question,options)
-            print_scores(normal,'Method 1 (Question Search)')
-            withoption = scores_with_options(question,options)
-            print_scores(withoption,'Method 2 (Question and Options search)')
